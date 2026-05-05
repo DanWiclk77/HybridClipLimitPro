@@ -1,0 +1,41 @@
+name: Build VST3
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Loudness Catalyst on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Setup JUCE
+        run: |
+          git clone --depth 1 https://github.com/juce-framework/JUCE.git
+        shell: bash
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
+      - name: Configure CMake
+        run: cmake -B build -D JUCE_PATH=./JUCE -D CMAKE_BUILD_TYPE=Release
+
+      - name: Build Plugin
+        run: cmake --build build --config Release --target LoudnessCatalyst_VST3
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: LoudnessCatalyst-${{ runner.os }}
+          path: build/LoudnessCatalyst_artefacts/Release/VST3/LoudnessCatalyst.vst3
