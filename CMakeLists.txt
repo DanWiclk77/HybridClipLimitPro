@@ -28,10 +28,13 @@ target_sources(LoudnessCatalyst
         Source/PluginEditor.h
         Source/LoudnessEngine.h)
 
+target_include_directories(LoudnessCatalyst PRIVATE Source)
+
 target_compile_definitions(LoudnessCatalyst
     PUBLIC
         JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0)
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_link_libraries(LoudnessCatalyst
     PRIVATE

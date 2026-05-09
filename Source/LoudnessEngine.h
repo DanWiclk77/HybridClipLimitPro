@@ -21,6 +21,12 @@ public:
     void process(juce::AudioBuffer<float>& buffer) {
         juce::dsp::AudioBlock<float> block(buffer);
         
+        // Update limiter threshold
+        limiter.setThreshold(limitThresholdParam);
+        
+        // Apply clip gain
+        buffer.applyGain(juce::Decibels::decibelsToGain(clipGainParam));
+
         // 1. Etapa de Calidez Analógica (Saturación antes del clip)
         applyAnalogWarmth(buffer);
 
@@ -39,7 +45,13 @@ public:
         limiter.process(context);
     }
 
+    void setClipGain(float newGain) { clipGainParam = newGain; }
+    void setLimitThreshold(float newThreshold) { limitThresholdParam = newThreshold; }
+
 private:
+    float clipGainParam = 0.0f;
+    float limitThresholdParam = 0.0f;
+
     float softClip(float x) {
         // Curva de saturación analógica estilo Standard Clip
         if (std::abs(x) < 0.5f) return x;
