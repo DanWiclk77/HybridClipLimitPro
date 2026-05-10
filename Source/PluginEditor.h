@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 
+// Custom Meter Component
 class LevelMeter : public juce::Component {
 public:
     void setLevel(float v) { level = v; }
@@ -12,20 +13,18 @@ public:
         g.setColour(juce::Colour(0xFF151518));
         g.fillRect(area);
         
+        float h;
         if (isGR) {
-            // Gain Reduction: 0 dB to -24 dB range for display
             float db = juce::jlimit(-24.0f, 0.0f, level);
-            float h = area.getHeight() * (db / -24.0f);
+            h = area.getHeight() * (db / -24.0f);
             g.setColour(color);
             g.fillRect(area.removeFromTop((int)h));
         } else {
-            // Signal Level: Linear gain (0.0 to 1.5 for headroom)
-            float h = area.getHeight() * juce::jlimit(0.0f, 1.2f, level) / 1.2f;
+            h = area.getHeight() * juce::jlimit(0.0f, 1.2f, level) / 1.2f;
             g.setColour(color);
             g.fillRect(area.withTop(area.getHeight() - (int)h));
         }
 
-        // Draw scale lines
         g.setColour(juce::Colours::white.withAlpha(0.1f));
         for (int i = 1; i < 4; ++i) {
             float y = area.getHeight() * (i / 4.0f);
@@ -41,42 +40,54 @@ private:
 class LoudnessCatalystAudioProcessorEditor : public juce::AudioProcessorEditor, public juce::Timer {
 public:
     LoudnessCatalystAudioProcessorEditor (LoudnessCatalystAudioProcessor& p) : AudioProcessorEditor (&p), processor (p) {
-        // --- CLIPPER ---
-        setupSlider(clipGainSlider, clipGainLabel, "INPUT GAIN", " dB");
-        clipGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "clipGain", clipGainSlider);
-        
-        setupSlider(clipKneeSlider, clipKneeLabel, "KNEE", "");
-        clipKneeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "clipKnee", clipKneeSlider);
-
-        // --- ENGINE ---
+        // --- COL 1: SATURATION / WARMTH ---
         setupSlider(warmthSlider, warmthLabel, "WARMTH", "%");
         warmthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "warmth", warmthSlider);
+        
+        setupBypass(warmthBypassBtn, "WARMTH BYPASS", "warmthBypass");
 
         addAndMakeVisible(targetCombo);
         targetCombo.addItemList({"Smart Target: Off", "-14 LUFS", "-13 LUFS", "-12 LUFS", "-11 LUFS", "-10 LUFS", "-9 LUFS", "-8 LUFS", "-7 LUFS", "-6 LUFS", "-5 LUFS", "-4 LUFS", "-3 LUFS", "-2 LUFS"}, 1);
         targetAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(processor.apvts, "targetLufs", targetCombo);
 
-        // --- LIMITER ---
+        // --- COL 2: CLIPPER ---
+        setupSlider(clipGainSlider, clipGainLabel, "CLIP GAIN", " dB");
+        clipGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "clipGain", clipGainSlider);
+        
+        setupSlider(clipKneeSlider, clipKneeLabel, "CLIP KNEE", "");
+        clipKneeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "clipKnee", clipKneeSlider);
+
+        setupSlider(clipCeilingSlider, clipCeilingLabel, "CLIP CEIL", " dB");
+        clipCeilingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "clipCeiling", clipCeilingSlider);
+
+        setupBypass(clipBypassBtn, "CLIP BYPASS", "clipBypass");
+
+        // --- COL 3: LIMITER ---
         setupSlider(limitThresholdSlider, limitThresholdLabel, "THRESHOLD", " dB");
         limitThresholdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "limitThreshold", limitThresholdSlider);
         
         setupSlider(releaseSlider, releaseLabel, "RELEASE", " ms");
         releaseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "release", releaseSlider);
 
-        setupSlider(ceilingSlider, ceilingLabel, "CEILING", " dB");
-        ceilingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "ceiling", ceilingSlider);
+        setupSlider(limitCeilingSlider, limitCeilingLabel, "CEILING", " dB");
+        limitCeilingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "limitCeiling", limitCeilingSlider);
 
-        // --- METERS ---
+        setupBypass(limitBypassBtn, "LIMIT BYPASS", "limitBypass");
+
+        // --- METERS & READOUTS ---
         inMeter.color = juce::Colours::cyan;
         outMeter.color = juce::Colours::lime;
-        grMeter.color = juce::Colours::red;
-        grMeter.setIsGR(true);
+        clipGRMeter.color = juce::Colours::orange;
+        clipGRMeter.setIsGR(true);
+        limitGRMeter.color = juce::Colours::red;
+        limitGRMeter.setIsGR(true);
 
         addAndMakeVisible(inMeter);
         addAndMakeVisible(outMeter);
-        addAndMakeVisible(grMeter);
+        addAndMakeVisible(clipGRMeter);
+        addAndMakeVisible(limitGRMeter);
 
-        setSize (750, 480);
+        setSize (850, 480);
         startTimerHz(30);
     }
 
@@ -92,75 +103,90 @@ public:
 
         inLevel = updateLevel(inLevel, processor.getInLevel());
         outLevel = updateLevel(outLevel, processor.getOutLevel());
-        grLevel = updateGR(grLevel, processor.getGRLevel());
+        clipGRLevel = updateGR(clipGRLevel, processor.getClipGR());
+        limitGRLevel = updateGR(limitGRLevel, processor.getLimiterGR());
 
         inMeter.setLevel(inLevel);
         outMeter.setLevel(outLevel);
-        grMeter.setLevel(grLevel);
+        clipGRMeter.setLevel(clipGRLevel);
+        limitGRMeter.setLevel(limitGRLevel);
         repaint();
     }
 
     void paint (juce::Graphics& g) override {
         g.fillAll (juce::Colour (0xFF0A0A0C));
-        
         auto area = getLocalBounds();
-        auto header = area.removeFromTop(80).reduced(20, 0);
+        auto header = area.removeFromTop(70).reduced(20, 0);
         
         g.setColour (juce::Colours::white.withAlpha(0.9f));
         g.setFont (juce::Font ("Inter", 24.0f, juce::Font::bold));
-        g.drawText ("LOUDNESS CATALYST", header.getX(), header.getY() + 10, 300, 30, juce::Justification::left);
-        
+        g.drawText ("LOUDNESS CATALYST", header.getX(), header.getY() + 5, 300, 30, juce::Justification::left);
         g.setColour (juce::Colours::blueviolet);
         g.setFont (juce::Font ("Inter", 10.0f, juce::Font::bold));
-        g.drawText ("ANALOG MASTERING CHAIN", header.getX() + 2, header.getY() + 38, 300, 15, juce::Justification::left);
+        g.drawText ("ANALOG MASTERING TOOLKIT", header.getX() + 2, header.getY() + 32, 300, 15, juce::Justification::left);
 
-        // Section Backgrounds
-        g.setColour(juce::Colours::white.withAlpha(0.03f));
-        auto contentArea = area.reduced(20);
-        auto meterArea = contentArea.removeFromRight(120);
+        auto contentArea = area.reduced(15);
+        auto meterArea = contentArea.removeFromRight(180);
         
         float colWidth = contentArea.getWidth() / 3.0f;
+        g.setColour(juce::Colours::white.withAlpha(0.04f));
+        g.fillRect(contentArea.removeFromLeft((int)colWidth).reduced(5)); // Warmth
         g.fillRect(contentArea.removeFromLeft((int)colWidth).reduced(5)); // Clipper
-        g.fillRect(contentArea.removeFromLeft((int)colWidth).reduced(5)); // Engine
         g.fillRect(contentArea.reduced(5)); // Limiter
 
-        // Meter Labels
+        // Numerical Readouts
+        g.setColour (juce::Colours::white.withAlpha(0.6f));
+        g.setFont (juce::Font("Inter", 11.0f, juce::Font::plain));
+        
+        auto formatDB = [](float v) { return juce::String(juce::Decibels::gainToDecibels(v), 1) + " dB"; };
+        auto formatGR = [](float v) { return juce::String(v, 1) + " dB"; };
+
+        auto readoutY = meterArea.getBottom() - 15;
+        g.drawText(formatDB(inLevel), meterArea.getX(), readoutY, 40, 15, juce::Justification::centred);
+        g.drawText(formatGR(clipGRLevel), meterArea.getX() + 45, readoutY, 40, 15, juce::Justification::centred);
+        g.drawText(formatGR(limitGRLevel), meterArea.getX() + 90, readoutY, 40, 15, juce::Justification::centred);
+        g.drawText(formatDB(outLevel), meterArea.getX() + 135, readoutY, 40, 15, juce::Justification::centred);
+
         g.setColour (juce::Colours::grey);
-        g.setFont (juce::Font("Inter", 10.0f, juce::Font::plain));
-        auto labelY = meterArea.getBottom() - 20;
-        g.drawText("IN", meterArea.getX() + 10, labelY, 25, 20, juce::Justification::centred);
-        g.drawText("GR", meterArea.getX() + 45, labelY, 25, 20, juce::Justification::centred);
-        g.drawText("OUT", meterArea.getX() + 80, labelY, 25, 20, juce::Justification::centred);
+        g.drawText("IN", meterArea.getX(), readoutY - 15, 40, 15, juce::Justification::centred);
+        g.drawText("C-GR", meterArea.getX() + 45, readoutY - 15, 40, 15, juce::Justification::centred);
+        g.drawText("L-GR", meterArea.getX() + 90, readoutY - 15, 40, 15, juce::Justification::centred);
+        g.drawText("OUT", meterArea.getX() + 135, readoutY - 15, 40, 15, juce::Justification::centred);
     }
 
     void resized() override {
         auto area = getLocalBounds();
-        area.removeFromTop(80); // Header
-        auto contentArea = area.reduced(20);
+        area.removeFromTop(70);
+        auto contentArea = area.reduced(15);
         
-        auto meterArea = contentArea.removeFromRight(120).reduced(10, 30);
-        inMeter.setBounds(meterArea.removeFromLeft(30).reduced(2, 0));
-        grMeter.setBounds(meterArea.removeFromLeft(30).reduced(2, 0));
-        outMeter.setBounds(meterArea.removeFromLeft(30).reduced(2, 0));
+        auto meterArea = contentArea.removeFromRight(180).reduced(5, 40);
+        inMeter.setBounds(meterArea.removeFromLeft(40).reduced(10, 0));
+        clipGRMeter.setBounds(meterArea.removeFromLeft(40).reduced(10, 0));
+        limitGRMeter.setBounds(meterArea.removeFromLeft(40).reduced(10, 0));
+        outMeter.setBounds(meterArea.removeFromLeft(40).reduced(10, 0));
 
         float colWidth = contentArea.getWidth() / 3.0f;
+        auto warmthArea = contentArea.removeFromLeft((int)colWidth).reduced(10);
         auto clipperArea = contentArea.removeFromLeft((int)colWidth).reduced(10);
-        auto engineArea = contentArea.removeFromLeft((int)colWidth).reduced(10);
         auto limiterArea = contentArea.reduced(10);
 
-        // Clipper Layout
-        clipGainSlider.setBounds(clipperArea.removeFromTop(160));
-        clipKneeSlider.setBounds(clipperArea.removeFromTop(160));
+        // SATURATION LAYOUT
+        warmthBypassBtn.setBounds(warmthArea.removeFromTop(30).reduced(10, 0));
+        warmthSlider.setBounds(warmthArea.removeFromTop(160));
+        warmthArea.removeFromTop(20);
+        targetCombo.setBounds(warmthArea.removeFromTop(30).reduced(20, 0));
 
-        // Engine Layout
-        warmthSlider.setBounds(engineArea.removeFromTop(160));
-        engineArea.removeFromTop(20); // Spacer
-        targetCombo.setBounds(engineArea.removeFromTop(30).reduced(10, 0));
+        // CLIPPER LAYOUT
+        clipBypassBtn.setBounds(clipperArea.removeFromTop(30).reduced(10, 0));
+        clipGainSlider.setBounds(clipperArea.removeFromTop(120));
+        clipKneeSlider.setBounds(clipperArea.removeFromTop(120));
+        clipCeilingSlider.setBounds(clipperArea.removeFromTop(120));
 
-        // Limiter Layout
+        // LIMITER LAYOUT
+        limitBypassBtn.setBounds(limiterArea.removeFromTop(30).reduced(10, 0));
         limitThresholdSlider.setBounds(limiterArea.removeFromTop(120));
         releaseSlider.setBounds(limiterArea.removeFromTop(120));
-        ceilingSlider.setBounds(limiterArea.removeFromTop(120));
+        limitCeilingSlider.setBounds(limiterArea.removeFromTop(120));
     }
 
 private:
@@ -169,36 +195,46 @@ private:
         s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 18);
         s.setTextValueSuffix (suffix);
         s.setColour(juce::Slider::rotarySliderFillColourId, juce::Colours::blueviolet);
-        s.setColour(juce::Slider::thumbColourId, juce::Colours::white);
         addAndMakeVisible (s);
-
         l.setText (name, juce::dontSendNotification);
         l.setJustificationType (juce::Justification::centred);
-        l.setFont(juce::Font("Inter", 12.0f, juce::Font::bold));
+        l.setFont(juce::Font("Inter", 11.0f, juce::Font::bold));
         l.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
         addAndMakeVisible (l);
         l.attachToComponent (&s, false);
     }
 
-    LoudnessCatalystAudioProcessor& processor;
-    float inLevel = 0.0f, outLevel = 0.0f, grLevel = 0.0f;
+    void setupBypass(juce::ToggleButton& b, juce::String name, juce::String paramId) {
+        b.setButtonText(name);
+        addAndMakeVisible(b);
+        b.setColour(juce::ToggleButton::textColourId, juce::Colours::grey);
+        b.setColour(juce::ToggleButton::tickColourId, juce::Colours::blueviolet);
+        attachments.add(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, paramId, b));
+    }
 
-    juce::Slider clipGainSlider, clipKneeSlider;
+    LoudnessCatalystAudioProcessor& processor;
+    float inLevel = 0.0f, outLevel = 0.0f, clipGRLevel = 0.0f, limitGRLevel = 0.0f;
+
     juce::Slider warmthSlider;
-    juce::Slider limitThresholdSlider, releaseSlider, ceilingSlider;
+    juce::Slider clipGainSlider, clipKneeSlider, clipCeilingSlider;
+    juce::Slider limitThresholdSlider, releaseSlider, limitCeilingSlider;
     
-    juce::Label clipGainLabel, clipKneeLabel;
     juce::Label warmthLabel;
-    juce::Label limitThresholdLabel, releaseLabel, ceilingLabel;
+    juce::Label clipGainLabel, clipKneeLabel, clipCeilingLabel;
+    juce::Label limitThresholdLabel, releaseLabel, limitCeilingLabel;
+
+    juce::ToggleButton warmthBypassBtn, clipBypassBtn, limitBypassBtn;
     
     juce::ComboBox targetCombo;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> targetAttachment;
 
-    LevelMeter inMeter, outMeter, grMeter;
+    LevelMeter inMeter, outMeter, clipGRMeter, limitGRMeter;
 
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> clipGainAttachment, clipKneeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> warmthAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> limitThresholdAttachment, releaseAttachment, ceilingAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> clipGainAttachment, clipKneeAttachment, clipCeilingAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> limitThresholdAttachment, releaseAttachment, limitCeilingAttachment;
+    
+    juce::OwnedArray<juce::AudioProcessorValueTreeState::ButtonAttachment> attachments;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LoudnessCatalystAudioProcessorEditor)
 };

@@ -18,13 +18,18 @@ public:
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override {
         juce::ScopedNoDenormals noDenormals;
         
-        // Sincronizar parámetros con el motor
+        engine.setWarmthBypass(apvts.getRawParameterValue("warmthBypass")->load() > 0.5f);
+        engine.setClipBypass(apvts.getRawParameterValue("clipBypass")->load() > 0.5f);
+        engine.setLimitBypass(apvts.getRawParameterValue("limitBypass")->load() > 0.5f);
+
         engine.setClipGain(apvts.getRawParameterValue("clipGain")->load());
+        engine.setClipCeiling(apvts.getRawParameterValue("clipCeiling")->load());
         engine.setClipKnee(apvts.getRawParameterValue("clipKnee")->load());
+
         engine.setLimitThreshold(apvts.getRawParameterValue("limitThreshold")->load());
-        engine.setLookAhead(apvts.getRawParameterValue("lookAhead")->load());
+        engine.setLimitCeiling(apvts.getRawParameterValue("limitCeiling")->load());
         engine.setRelease(apvts.getRawParameterValue("release")->load());
-        engine.setCeiling(apvts.getRawParameterValue("ceiling")->load());
+        
         engine.setWarmth(apvts.getRawParameterValue("warmth")->load());
         engine.setTargetIndex((int)apvts.getRawParameterValue("targetLufs")->load());
         
@@ -58,29 +63,31 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout() {
         juce::AudioProcessorValueTreeState::ParameterLayout layout;
         
-        // Clipper Params
-        layout.add(std::make_unique<juce::AudioParameterFloat>("clipGain", "Clipper Gain", 0.0f, 24.0f, 0.0f));
-        layout.add(std::make_unique<juce::AudioParameterFloat>("clipKnee", "Clipper Knee", 0.0f, 1.0f, 0.5f));
-        
-        // Limiter Params
-        layout.add(std::make_unique<juce::AudioParameterFloat>("limitThreshold", "Limiter Threshold", -24.0f, 0.0f, 0.0f));
-        layout.add(std::make_unique<juce::AudioParameterFloat>("lookAhead", "Look-ahead", 0.1f, 5.0f, 1.0f));
-        layout.add(std::make_unique<juce::AudioParameterFloat>("release", "Release", 10.0f, 1000.0f, 100.0f));
-        
-        // Output/Warmth Params
-        layout.add(std::make_unique<juce::AudioParameterFloat>("ceiling", "Output Ceiling", -12.0f, 0.0f, 0.0f));
+        // --- WARMTH / SATURATION ---
         layout.add(std::make_unique<juce::AudioParameterFloat>("warmth", "Analog Warmth", 0.0f, 100.0f, 0.0f));
-
-        // Smart Target Param
+        layout.add(std::make_unique<juce::AudioParameterBool>("warmthBypass", "Warmth Bypass", false));
         layout.add(std::make_unique<juce::AudioParameterChoice>("targetLufs", "Target LUFS", 
             juce::StringArray {"Off", "-14", "-13", "-12", "-11", "-10", "-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2"}, 0));
+
+        // --- CLIPPER ---
+        layout.add(std::make_unique<juce::AudioParameterFloat>("clipGain", "Clipper Gain", 0.0f, 24.0f, 0.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("clipCeiling", "Clipper Ceiling", -12.0f, 0.0f, 0.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("clipKnee", "Clipper Knee", 0.0f, 1.0f, 0.5f));
+        layout.add(std::make_unique<juce::AudioParameterBool>("clipBypass", "Clipper Bypass", false));
+
+        // --- LIMITER ---
+        layout.add(std::make_unique<juce::AudioParameterFloat>("limitThreshold", "Limiter Threshold", -24.0f, 0.0f, 0.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("limitCeiling", "Limiter Ceiling", -12.0f, 0.0f, 0.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("release", "Limiter Release", 10.0f, 1000.0f, 100.0f));
+        layout.add(std::make_unique<juce::AudioParameterBool>("limitBypass", "Limiter Bypass", false));
 
         return layout;
     }
 
     float getInLevel() const { return engine.getInLevel(); }
     float getOutLevel() const { return engine.getOutLevel(); }
-    float getGRLevel() const { return engine.getGRLevel(); }
+    float getClipGR() const { return engine.getClipGR(); }
+    float getLimiterGR() const { return engine.getLimiterGR(); }
 
     juce::AudioProcessorValueTreeState apvts;
 private:
