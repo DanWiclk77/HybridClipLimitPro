@@ -30,6 +30,12 @@ Your absolute priority is to build a high-performance, studio-grade VST3 plugin 
 - **Direct Compilation:** The workflow must produce a ready-to-use `.vst3` bundle as a downloadable artifact.
 - **Windows Runner:** Use `windows-latest` with `ilammy/msvc-dev-cmd@v1`.
 - **JUCE Cloning:** Shallow clone JUCE directly in the workflow to avoid submodule issues.
+- **Actualización Crítica:** He actualizado a `actions/upload-artifact@v4` para evitar el error de depreciación.
+- **CMake Robusto:** Configurado para autodetectar la versión de Visual Studio en los runners de Windows, evitando fallos de generador.
+- **CMake Generators (Windows):** Do NOT specify the generator version (e.g., `-G "Visual Studio 17 2022"`) to avoid version mismatch errors in runners. Use `cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release` to let CMake auto-detect while maintaining architecture.
+
+### 6. Build & Debugging Guidelines
+- **Verbose Output:** Always use verbosity flags (e.g., `--parallel 4 --verbose` in CMake) in GitHub Actions and local scripts to diagnose architecture failures or missing libraries instantly.
 
 ## Zero-Failure Protocol
 1. **Host-First Mindset:** If a feature risks DAW stability, prioritize stability over visual flair.

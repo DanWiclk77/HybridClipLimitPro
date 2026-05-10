@@ -29,10 +29,16 @@ jobs:
         shell: bash
 
       - name: Configure CMake
-        run: cmake -B build -D JUCE_PATH=./JUCE -D CMAKE_BUILD_TYPE=Release
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            cmake -B build -A x64 -D JUCE_PATH=./JUCE -D CMAKE_BUILD_TYPE=Release
+          else
+            cmake -B build -D JUCE_PATH=./JUCE -D CMAKE_BUILD_TYPE=Release
+          fi
+        shell: bash
 
       - name: Build Plugin
-        run: cmake --build build --config Release --target LoudnessCatalyst_VST3
+        run: cmake --build build --config Release --target LoudnessCatalyst_VST3 --parallel 4 --verbose
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
