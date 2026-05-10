@@ -85,10 +85,11 @@ public:
         addAndMakeVisible(limitGRMeter);
 
         addAndMakeVisible(resetBtn);
-        resetBtn.setButtonText("RESET INT");
+        resetBtn.setButtonText("RESET");
+        resetBtn.setTooltip("Reset Integrated LUFS measurement");
         resetBtn.onClick = [this] { processor.resetIntegrated(); };
 
-        setSize (920, 520);
+        setSize (1000, 680);
         startTimerHz(30);
     }
 
@@ -125,99 +126,110 @@ public:
         auto header = area.removeFromTop(70).reduced(20, 0);
         
         g.setColour (juce::Colours::white.withAlpha(0.9f));
-        g.setFont (juce::Font ("Inter", 26.0f, juce::Font::bold));
-        g.drawText ("LOUDNESS CATALYST", header.getX(), header.getY() + 5, 400, 30, juce::Justification::left);
+        g.setFont (juce::Font ("Inter", 28.0f, juce::Font::bold));
+        g.drawText ("LOUDNESS CATALYST", header.getX(), header.getY() + 10, 400, 35, juce::Justification::left);
         g.setColour (juce::Colours::blueviolet);
-        g.setFont (juce::Font ("Inter", 11.0f, juce::Font::bold));
-        g.drawText ("ANALOG MASTERING TOOLKIT v1.0", header.getX() + 2, header.getY() + 32, 300, 15, juce::Justification::left);
+        g.setFont (juce::Font ("Inter", 12.0f, juce::Font::bold));
+        g.drawText ("ANALOG MASTERING TOOLKIT v1.0", header.getX() + 2, header.getY() + 42, 300, 15, juce::Justification::left);
 
-        auto contentArea = area.reduced(15);
-        auto meterArea = contentArea.removeFromRight(220); // More space for LUFS
+        auto contentArea = area.reduced(20);
+        auto meterArea = contentArea.removeFromRight(240);
         
         float colWidth = contentArea.getWidth() / 3.0f;
-        g.setColour(juce::Colours::white.withAlpha(0.03f));
+        g.setColour(juce::Colours::white.withAlpha(0.025f));
         g.fillRect(contentArea.removeFromLeft((int)colWidth).reduced(5)); // Warmth
         g.fillRect(contentArea.removeFromLeft((int)colWidth).reduced(5)); // Clipper
         g.fillRect(contentArea.reduced(5)); // Limiter
 
         // Meter labels & numerical db/gr
-        auto readoutY = meterArea.getBottom() - 35;
+        auto meterReadoutArea = meterArea.removeFromBottom(80).reduced(10, 0);
         g.setColour(juce::Colours::grey);
-        g.setFont(juce::Font("Inter", 10.0f, juce::Font::plain));
+        g.setFont(juce::Font("Inter", 11.0f, juce::Font::plain));
         
         auto formatDB = [](float v) { return juce::String(juce::Decibels::gainToDecibels(v), 1); };
         auto formatGR = [](float v) { return juce::String(v, 1); };
 
-        g.drawText("IN", meterArea.getX(), readoutY - 15, 35, 15, juce::Justification::centred);
-        g.drawText("C-GR", meterArea.getX() + 40, readoutY - 15, 35, 15, juce::Justification::centred);
-        g.drawText("L-GR", meterArea.getX() + 80, readoutY - 15, 35, 15, juce::Justification::centred);
-        g.drawText("OUT", meterArea.getX() + 120, readoutY - 15, 35, 15, juce::Justification::centred);
+        int meterX = meterReadoutArea.getX();
+        int meterTargetY = meterReadoutArea.getY() + 20;
 
-        g.setColour(juce::Colours::white.withAlpha(0.7f));
-        g.drawText(formatDB(inLevel), meterArea.getX(), readoutY, 35, 15, juce::Justification::centred);
-        g.drawText(formatGR(clipGRLevel), meterArea.getX() + 40, readoutY, 35, 15, juce::Justification::centred);
-        g.drawText(formatGR(limitGRLevel), meterArea.getX() + 80, readoutY, 35, 15, juce::Justification::centred);
-        g.drawText(formatDB(outLevel), meterArea.getX() + 120, readoutY, 35, 15, juce::Justification::centred);
+        g.drawText("IN",   meterX,      meterTargetY, 40, 15, juce::Justification::centred);
+        g.drawText("C-GR", meterX + 45, meterTargetY, 40, 15, juce::Justification::centred);
+        g.drawText("L-GR", meterX + 90, meterTargetY, 40, 15, juce::Justification::centred);
+        g.drawText("OUT",  meterX + 135, meterTargetY, 40, 15, juce::Justification::centred);
+
+        g.setColour(juce::Colours::white.withAlpha(0.8f));
+        g.setFont(juce::Font("Inter", 12.0f, juce::Font::bold));
+        g.drawText(formatDB(inLevel),      meterX,      meterTargetY + 20, 40, 20, juce::Justification::centred);
+        g.drawText(formatGR(clipGRLevel),  meterX + 45, meterTargetY + 20, 40, 20, juce::Justification::centred);
+        g.drawText(formatGR(limitGRLevel), meterX + 90, meterTargetY + 20, 40, 20, juce::Justification::centred);
+        g.drawText(formatDB(outLevel),     meterX + 135, meterTargetY + 20, 40, 20, juce::Justification::centred);
 
         // LUFS Indicators
-        auto lufsArea = meterArea.removeFromRight(50);
+        auto lufsArea = meterArea.removeFromRight(60);
         g.setColour(juce::Colours::white.withAlpha(0.1f));
-        g.drawVerticalLine(lufsArea.getX() - 5, (float)lufsArea.getY() + 20, (float)lufsArea.getBottom() - 50);
+        g.drawVerticalLine(lufsArea.getX() - 5, (float)meterArea.getY() + 20, (float)meterArea.getBottom() - 20);
 
         g.setColour(juce::Colours::lightgrey);
-        g.setFont(juce::Font("Inter", 11.0f, juce::Font::bold));
+        g.setFont(juce::Font("Inter", 12.0f, juce::Font::bold));
         
         auto drawLUFS = [&](juce::String label, float val, int yOffset) {
-            g.drawText(label, lufsArea.getX(), lufsArea.getY() + yOffset, 45, 15, juce::Justification::centred);
+            g.drawText(label, lufsArea.getX(), meterArea.getY() + yOffset, 55, 15, juce::Justification::centred);
             juce::String s = (val < -90) ? "---" : juce::String(val, 1);
             g.setColour(juce::Colours::white);
-            g.drawText(s, lufsArea.getX(), lufsArea.getY() + yOffset + 18, 45, 20, juce::Justification::centred);
+            g.setFont(juce::Font("Inter", 14.0f, juce::Font::bold));
+            g.drawText(s, lufsArea.getX(), meterArea.getY() + yOffset + 22, 55, 20, juce::Justification::centred);
         };
 
-        drawLUFS("MOM", m_lufs, 30);
-        drawLUFS("ST", s_lufs, 90);
-        drawLUFS("INT", i_lufs, 150);
+        drawLUFS("MOM", m_lufs, 50);
+        drawLUFS("ST",  s_lufs, 130);
+        drawLUFS("INT", i_lufs, 210);
     }
 
     void resized() override {
         auto area = getLocalBounds();
         area.removeFromTop(70);
-        auto contentArea = area.reduced(15);
+        auto contentArea = area.reduced(20);
         
-        auto meterArea = contentArea.removeFromRight(220).reduced(5, 40);
-        auto lufsDisplayArea = meterArea.removeFromRight(50);
-        resetBtn.setBounds(lufsDisplayArea.getX() - 5, lufsDisplayArea.getY() + 210, 60, 25);
+        auto meterOverallArea = contentArea.removeFromRight(240);
+        auto meterVisuals = meterOverallArea;
+        meterVisuals.removeFromBottom(80); // Move visual bars up
+        
+        auto meterBarsArea = meterVisuals.reduced(10, 40);
+        auto lufsDisplayArea = meterBarsArea.removeFromRight(60);
+        
+        inMeter.setBounds(meterBarsArea.removeFromLeft(45).reduced(12, 0));
+        clipGRMeter.setBounds(meterBarsArea.removeFromLeft(45).reduced(12, 0));
+        limitGRMeter.setBounds(meterBarsArea.removeFromLeft(45).reduced(12, 0));
+        outMeter.setBounds(meterBarsArea.removeFromLeft(45).reduced(12, 0));
 
-        inMeter.setBounds(meterArea.removeFromLeft(40).reduced(12, 0));
-        clipGRMeter.setBounds(meterArea.removeFromLeft(40).reduced(12, 0));
-        limitGRMeter.setBounds(meterArea.removeFromLeft(40).reduced(12, 0));
-        outMeter.setBounds(meterArea.removeFromLeft(40).reduced(12, 0));
+        // Reset button aligned with LUFS area
+        resetBtn.setBounds(lufsDisplayArea.getX() + 5, meterOverallArea.getBottom() - 40, 65, 28);
 
         float colWidth = contentArea.getWidth() / 3.0f;
-        auto warmthArea = contentArea.removeFromLeft((int)colWidth).reduced(10);
-        auto clipperArea = contentArea.removeFromLeft((int)colWidth).reduced(10);
-        auto limiterArea = contentArea.reduced(10);
+        auto warmthArea = contentArea.removeFromLeft((int)colWidth).reduced(15);
+        auto clipperArea = contentArea.removeFromLeft((int)colWidth).reduced(15);
+        auto limiterArea = contentArea.reduced(15);
 
         // SATURATION LAYOUT
-        warmthBypassBtn.setBounds(warmthArea.removeFromTop(30).reduced(10, 0));
+        warmthBypassBtn.setBounds(warmthArea.removeFromTop(40).reduced(10, 0));
         warmthArea.removeFromTop(10);
-        warmthSlider.setBounds(warmthArea.removeFromTop(150));
-        warmthArea.removeFromTop(30);
-        targetCombo.setBounds(warmthArea.removeFromTop(30).reduced(15, 0));
+        warmthSlider.setBounds(warmthArea.removeFromTop(180));
+        warmthArea.removeFromTop(40);
+        targetCombo.setBounds(warmthArea.removeFromTop(40).reduced(15, 0));
 
         // CLIPPER LAYOUT
-        clipBypassBtn.setBounds(clipperArea.removeFromTop(30).reduced(10, 0));
-        clipAreaLabel.setBounds(clipperArea.removeFromTop(10)); // dummy for space
-        clipGainSlider.setBounds(clipperArea.removeFromTop(110));
-        clipKneeSlider.setBounds(clipperArea.removeFromTop(110));
-        clipCeilingSlider.setBounds(clipperArea.removeFromTop(110));
+        clipBypassBtn.setBounds(clipperArea.removeFromTop(40).reduced(10, 0));
+        clipperArea.removeFromTop(10);
+        clipGainSlider.setBounds(clipperArea.removeFromTop(140));
+        clipKneeSlider.setBounds(clipperArea.removeFromTop(140));
+        clipCeilingSlider.setBounds(clipperArea.removeFromTop(140));
 
         // LIMITER LAYOUT
-        limitBypassBtn.setBounds(limiterArea.removeFromTop(30).reduced(10, 0));
-        limitAreaLabel.setBounds(limiterArea.removeFromTop(10)); // dummy for space
-        limitThresholdSlider.setBounds(limiterArea.removeFromTop(110));
-        releaseSlider.setBounds(limiterArea.removeFromTop(110));
-        limitCeilingSlider.setBounds(limiterArea.removeFromTop(110));
+        limitBypassBtn.setBounds(limiterArea.removeFromTop(40).reduced(10, 0));
+        limiterArea.removeFromTop(10);
+        limitThresholdSlider.setBounds(limiterArea.removeFromTop(140));
+        releaseSlider.setBounds(limiterArea.removeFromTop(140));
+        limitCeilingSlider.setBounds(limiterArea.removeFromTop(140));
     }
 
 private:
