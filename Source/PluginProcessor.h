@@ -81,7 +81,3 @@ private:
     LoudnessEngine engine;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LoudnessCatalystAudioProcessor)
 };
-
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
-    return new LoudnessCatalystAudioProcessor();
-}
