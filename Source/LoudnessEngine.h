@@ -10,10 +10,9 @@ public:
 
     void prepare(const juce::dsp::ProcessSpec& spec) {
         sampleRate = spec.sampleRate;
-        oversampler.reset(new juce::dsp::Oversampling<float>(
-            spec.numChannels, 2,
-            juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true));
-        oversampler->initProcessing(spec.maximumBlockSize);
+        lastSpec = spec;
+        
+        updateOversampling(currentFactor);
 
         limiter.prepare(spec);
 
@@ -29,6 +28,24 @@ public:
         *kFilter2.state = *stage2Coeffs;
 
         resetLUFS();
+    }
+
+    void updateOversampling(int factor) {
+        currentFactor = factor;
+        if (currentFactor > 0) {
+            oversampler.reset(new juce::dsp::Oversampling<float>(
+                lastSpec.numChannels, currentFactor,
+                juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true));
+            oversampler->initProcessing(lastSpec.maximumBlockSize);
+        } else {
+            oversampler.reset();
+        }
+        
+        // Prepare internal true peak upsampler if needed
+        truePeakOversampler.reset(new juce::dsp::Oversampling<float>(
+            lastSpec.numChannels, 2, // 4x total or just 4x? Pro-L2 does 4x.
+            juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true));
+        truePeakOversampler->initProcessing(lastSpec.maximumBlockSize);
     }
 
     void resetLUFS() {
@@ -60,41 +77,59 @@ public:
         // --- 2. CLIPPER SECTION ---
         float preClipPeak = buffer.getMagnitude(0, buffer.getNumSamples());
         if (!clipBypass) {
-            buffer.applyGain(juce::Decibels::decibelsToGain(clipGainParam));
+            float g = clipGainParam;
+            float c = clipCeilingParam;
+            
+            // Auto-Gain / Link logic (if implemented in UI)
+            buffer.applyGain(juce::Decibels::decibelsToGain(g));
             
             juce::dsp::AudioBlock<float> block(buffer);
-            auto upsampledBlock = oversampler->processSamplesUp(block);
-            for (size_t ch = 0; ch < upsampledBlock.getNumChannels(); ++ch) {
-                auto* samples = upsampledBlock.getChannelPointer(ch);
-                for (size_t i = 0; i < upsampledBlock.getNumSamples(); ++i)
-                    samples[i] = softClip(samples[i], clipKneeParam);
-            }
-            oversampler->processSamplesDown(block);
             
-            buffer.applyGain(juce::Decibels::decibelsToGain(clipCeilingParam));
+            if (oversampler) {
+                auto upsampledBlock = oversampler->processSamplesUp(block);
+                for (size_t ch = 0; ch < upsampledBlock.getNumChannels(); ++ch) {
+                    auto* samples = upsampledBlock.getChannelPointer(ch);
+                    for (size_t i = 0; i < upsampledBlock.getNumSamples(); ++i)
+                        samples[i] = processClip(samples[i]);
+                }
+                oversampler->processSamplesDown(block);
+            } else {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+                    auto* samples = buffer.getWritePointer(ch);
+                    for (int i = 0; i < buffer.getNumSamples(); ++i)
+                        samples[i] = processClip(samples[i]);
+                }
+            }
+            
+            buffer.applyGain(juce::Decibels::decibelsToGain(c));
             
             float postClipPeak = buffer.getMagnitude(0, buffer.getNumSamples());
             clipGR = juce::Decibels::gainToDecibels(postClipPeak) - juce::Decibels::gainToDecibels(preClipPeak + 0.00001f);
+            
+            lastClipIn = preClipPeak;
+            lastClipOut = postClipPeak;
         } else {
             clipGR = 0.0f;
+            lastClipIn = preClipPeak;
+            lastClipOut = preClipPeak;
         }
 
         // --- 3. LIMITER SECTION ---
         float preLimiterPeak = buffer.getMagnitude(0, buffer.getNumSamples());
         if (!limitBypass) {
-            limiter.setThreshold(limitThresholdParam);
-            limiter.setRelease(releaseParam);
-            
-            juce::dsp::AudioBlock<float> block(buffer);
-            juce::dsp::ProcessContextReplacing<float> context(block);
-            limiter.process(context);
-            
+            float preLimitPeak = buffer.getMagnitude(0, buffer.getNumSamples());
+            applyLimiter(buffer);
             buffer.applyGain(juce::Decibels::decibelsToGain(limitCeilingParam));
             
             float postLimiterPeak = buffer.getMagnitude(0, buffer.getNumSamples());
-            limitGR = juce::Decibels::gainToDecibels(postLimiterPeak) - juce::Decibels::gainToDecibels(preLimiterPeak + 0.00001f);
+            limitGR = juce::Decibels::gainToDecibels(postLimiterPeak) - juce::Decibels::gainToDecibels(preLimitPeak + 0.00001f);
+            
+            lastLimitIn = preLimitPeak;
+            lastLimitOut = postLimiterPeak;
         } else {
             limitGR = 0.0f;
+            lastLimitIn = buffer.getMagnitude(0, buffer.getNumSamples());
+            lastLimitOut = lastLimitIn;
         }
 
         // Measure Final Output Peak
@@ -135,6 +170,11 @@ public:
     float getClipGR()      const { return juce::jmin(0.0f, clipGR); }
     float getLimiterGR()   const { return juce::jmin(0.0f, limitGR); }
     
+    float getClipVisIn()   const { return lastClipIn; }
+    float getClipVisOut()  const { return lastClipOut; }
+    float getLimitVisIn()  const { return lastLimitIn; }
+    float getLimitVisOut() const { return lastLimitOut; }
+    
     float getMLUFS() const { return momentaryLUFS; }
     float getSLUFS() const { return shortTermLUFS; }
     float getILUFS() const { return integratedLUFS; }
@@ -146,16 +186,39 @@ public:
     void setClipGain       (float g) { clipGainParam = g; }
     void setClipCeiling    (float c) { clipCeilingParam = c; }
     void setClipKnee       (float k) { clipKneeParam = k; }
+    void setClipMode       (int m)   { clipModeParam = m; }
     
     void setLimitThreshold (float t) { limitThresholdParam = t; }
     void setLimitCeiling   (float c) { limitCeilingParam = c; }
     void setRelease        (float r) { releaseParam = r; }
+    void setAttack         (float a) { attackParam = a; }
+    void setLookahead      (float l) { lookaheadParam = l; }
+    void setLimitStyle     (int s)   { styleParam = s; }
+    void setTruePeak       (bool b)  { truePeakParam = b; }
     
     void setWarmth         (float w) { warmthParam = w; }
     void setTargetIndex    (int   i) { targetIndex = i; }
 
 private:
+    float processClip(float x) {
+        if (clipModeParam == 0) // Hard
+        {
+            return juce::jlimit(-1.0f, 1.0f, x);
+        }
+        else if (clipModeParam == 1) // Soft
+        {
+            return softClip(x, clipKneeParam);
+        }
+        else // Analog (Tanh)
+        {
+            float drive = 1.0f + (clipKneeParam * 0.5f);
+            return std::tanh(x * drive) / drive;
+        }
+    }
+
     double sampleRate = 44100.0;
+    juce::dsp::ProcessSpec lastSpec;
+    int currentFactor = 1; // Default 2x
     
     // LUFS Measurement
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> kFilter1;
@@ -174,6 +237,7 @@ private:
     bool  limitBypass       = false;
     
     int   targetIndex       = 0;
+    int   clipModeParam     = 0;
     float maxIn             = 0.0f;
     float maxOut            = 0.0f;
     float clipGR            = 0.0f;
@@ -187,6 +251,10 @@ private:
     float limitCeilingParam   = 0.0f;
     float warmthParam        = 0.0f;
     float releaseParam       = 100.0f;
+    float attackParam        = 1.0f;
+    float lookaheadParam     = 2.0f;
+    int   styleParam         = 0;
+    bool  truePeakParam      = false;
 
     float softClip(float x, float knee) {
         float threshold = 1.0f - (knee * 0.5f);
@@ -212,6 +280,35 @@ private:
         }
     }
 
+    void applyLimiter(juce::AudioBuffer<float>& buffer) {
+        // Tweak internal limiter based on style
+        float effectiveRelease = releaseParam;
+        
+        if (styleParam == 1) // Punchy
+            effectiveRelease *= 0.5f;
+        else if (styleParam == 2) // Dynamic
+            effectiveRelease *= 1.5f;
+        else if (styleParam == 3) // Safe
+            effectiveRelease = juce::jmax(100.0f, effectiveRelease);
+
+        limiter.setThreshold(limitThresholdParam);
+        limiter.setRelease(effectiveRelease);
+
+        juce::dsp::AudioBlock<float> block(buffer);
+        
+        if (truePeakParam && truePeakOversampler) {
+            // Simple true-peak approximation by 4x oversampling within the limiter
+            auto upsampled = truePeakOversampler->processSamplesUp(block);
+            juce::dsp::ProcessContextReplacing<float> context(upsampled);
+            limiter.process(context);
+            truePeakOversampler->processSamplesDown(block);
+        } else {
+            juce::dsp::ProcessContextReplacing<float> context(block);
+            limiter.process(context);
+        }
+    }
+
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
+    std::unique_ptr<juce::dsp::Oversampling<float>> truePeakOversampler;
     juce::dsp::Limiter<float> limiter;
 };
