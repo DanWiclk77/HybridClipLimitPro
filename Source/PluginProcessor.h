@@ -24,6 +24,8 @@ public:
         engine.setLimitThreshold(apvts.getRawParameterValue("limitThreshold")->load());
         engine.setLookAhead(apvts.getRawParameterValue("lookAhead")->load());
         engine.setRelease(apvts.getRawParameterValue("release")->load());
+        engine.setCeiling(apvts.getRawParameterValue("ceiling")->load());
+        engine.setWarmth(apvts.getRawParameterValue("warmth")->load());
         engine.setTargetIndex((int)apvts.getRawParameterValue("targetLufs")->load());
         
         engine.process(buffer);
@@ -65,6 +67,10 @@ public:
         layout.add(std::make_unique<juce::AudioParameterFloat>("lookAhead", "Look-ahead", 0.1f, 5.0f, 1.0f));
         layout.add(std::make_unique<juce::AudioParameterFloat>("release", "Release", 10.0f, 1000.0f, 100.0f));
         
+        // Output/Warmth Params
+        layout.add(std::make_unique<juce::AudioParameterFloat>("ceiling", "Output Ceiling", -12.0f, 0.0f, 0.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("warmth", "Analog Warmth", 0.0f, 100.0f, 0.0f));
+
         // Smart Target Param
         layout.add(std::make_unique<juce::AudioParameterChoice>("targetLufs", "Target LUFS", 
             juce::StringArray {"Off", "-14", "-13", "-12", "-11", "-10", "-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2"}, 0));

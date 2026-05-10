@@ -52,9 +52,9 @@ public:
 
         // 3. Clipper con Oversampling
         auto upsampledBlock = oversampler->processSamplesUp(block);
-        for (int ch = 0; ch < (int)upsampledBlock.getNumChannels(); ++ch) {
+        for (size_t ch = 0; ch < upsampledBlock.getNumChannels(); ++ch) {
             auto* samples = upsampledBlock.getChannelPointer(ch);
-            for (int i = 0; i < (int)upsampledBlock.getNumSamples(); ++i)
+            for (size_t i = 0; i < upsampledBlock.getNumSamples(); ++i)
                 samples[i] = softClip(samples[i], clipKneeParam);
         }
         oversampler->processSamplesDown(block);
@@ -65,6 +65,9 @@ public:
         // 4. Limitador Final
         juce::dsp::ProcessContextReplacing<float> context(block);
         limiter.process(context);
+
+        // 5. Output Ceiling
+        buffer.applyGain(juce::Decibels::decibelsToGain(ceilingParam));
 
         // Measure Output Peak
         maxOut = buffer.getMagnitude(0, buffer.getNumSamples());
@@ -88,6 +91,8 @@ public:
     void setClipKnee       (float newKnee)      { clipKneeParam      = newKnee;      }
     void setLimitThreshold (float newThreshold) { limitThresholdParam = newThreshold; }
     void setRelease        (float newRelease)   { releaseParam        = newRelease;   }
+    void setCeiling        (float newCeiling)   { ceilingParam        = newCeiling;   }
+    void setWarmth         (float newWarmth)    { warmthParam         = newWarmth;    }
     void setTargetIndex    (int   index)        { targetIndex         = index;        }
     void setLookAhead      (float /*unused*/)   { /* juce::dsp::Limiter no expone lookahead */ }
 
@@ -99,6 +104,8 @@ private:
     float clipGainParam     = 0.0f;
     float clipKneeParam     = 0.5f;
     float limitThresholdParam = 0.0f;
+    float ceilingParam      = 0.0f;
+    float warmthParam       = 0.0f;
     float releaseParam      = 100.0f;
 
     float softClip(float x, float knee) {
@@ -111,12 +118,17 @@ private:
     }
 
     void applyAnalogWarmth(juce::AudioBuffer<float>& buffer) {
+        if (warmthParam <= 0.0f) return;
+        
+        float drive = 1.0f + (warmthParam * 0.1f); // Scale 0-100 to a subtle drive
         for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
             auto* data = buffer.getWritePointer(ch);
             for (int i = 0; i < buffer.getNumSamples(); ++i)
-                data[i] = (data[i] > 0.0f)
-                    ? std::tanh(data[i] * 1.02f)
-                    : std::tanh(data[i] * 1.01f);
+            {
+                float x = data[i];
+                // Soft asymmetrical saturation for "analog" character
+                data[i] = (x > 0.0f) ? std::tanh(x * drive) : std::tanh(x * (drive * 0.98f));
+            }
         }
     }
 
