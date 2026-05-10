@@ -88,6 +88,10 @@ public:
     float getOutLevel() const { return engine.getOutLevel(); }
     float getClipGR() const { return engine.getClipGR(); }
     float getLimiterGR() const { return engine.getLimiterGR(); }
+    float getMLUFS() const { return engine.getMLUFS(); }
+    float getSLUFS() const { return engine.getSLUFS(); }
+    float getILUFS() const { return engine.getILUFS(); }
+    void resetIntegrated() { engine.resetLUFS(); }
 
     juce::AudioProcessorValueTreeState apvts;
 private:

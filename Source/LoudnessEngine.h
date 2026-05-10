@@ -9,12 +9,33 @@ public:
     LoudnessEngine() {}
 
     void prepare(const juce::dsp::ProcessSpec& spec) {
+        sampleRate = spec.sampleRate;
         oversampler.reset(new juce::dsp::Oversampling<float>(
             spec.numChannels, 2,
             juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true));
         oversampler->initProcessing(spec.maximumBlockSize);
 
         limiter.prepare(spec);
+
+        // LUFS K-Weighting filters
+        juce::dsp::IIR::Coefficients<float>::Ptr stage1Coeffs = 
+            juce::dsp::IIR::Coefficients<float>::makeHighShelf(sampleRate, 1500.0f, 1.0f, 4.0f);
+        juce::dsp::IIR::Coefficients<float>::Ptr stage2Coeffs = 
+            juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, 100.0f, 1.0f);
+
+        kFilter1.prepare(spec);
+        kFilter2.prepare(spec);
+        *kFilter1.state = *stage1Coeffs;
+        *kFilter2.state = *stage2Coeffs;
+
+        resetLUFS();
+    }
+
+    void resetLUFS() {
+        integratedSum = 0.0f;
+        integratedCount = 0;
+        momentaryMax = -100.0f;
+        shortTermMax = -100.0f;
     }
 
     void process(juce::AudioBuffer<float>& buffer) {
@@ -78,12 +99,45 @@ public:
 
         // Measure Final Output Peak
         maxOut = buffer.getMagnitude(0, buffer.getNumSamples());
+
+        // --- 4. LUFS MEASUREMENT (Approximate) ---
+        calculateLUFS(buffer);
+    }
+
+    void calculateLUFS(const juce::AudioBuffer<float>& buffer) {
+        juce::AudioBuffer<float> lufsBuffer;
+        lufsBuffer.makeCopyOf(buffer);
+        
+        juce::dsp::AudioBlock<float> block(lufsBuffer);
+        juce::dsp::ProcessContextReplacing<float> context(block);
+        kFilter1.process(context);
+        kFilter2.process(context);
+
+        float sumSquares = 0.0f;
+        for (int ch = 0; ch < lufsBuffer.getNumChannels(); ++ch)
+            sumSquares += lufsBuffer.getRMSLevel(ch, 0, lufsBuffer.getNumSamples()) * lufsBuffer.getRMSLevel(ch, 0, lufsBuffer.getNumSamples());
+        
+        float meanSquare = sumSquares / (float)lufsBuffer.getNumChannels();
+        float currentLoudness = -0.691f + 10.0f * std::log10(meanSquare + 1e-10f);
+
+        // Smoothing for Momentary (approx 400ms) and Short (approx 3s)
+        momentaryLUFS = momentaryLUFS * 0.95f + currentLoudness * 0.05f;
+        shortTermLUFS = shortTermLUFS * 0.99f + currentLoudness * 0.01f;
+
+        // Integrated
+        integratedSum += meanSquare;
+        integratedCount++;
+        integratedLUFS = -0.691f + 10.0f * std::log10((integratedSum / (float)integratedCount) + 1e-10f);
     }
 
     float getInLevel()     const { return maxIn; }
     float getOutLevel()    const { return maxOut; }
     float getClipGR()      const { return juce::jmin(0.0f, clipGR); }
     float getLimiterGR()   const { return juce::jmin(0.0f, limitGR); }
+    
+    float getMLUFS() const { return momentaryLUFS; }
+    float getSLUFS() const { return shortTermLUFS; }
+    float getILUFS() const { return integratedLUFS; }
 
     void setWarmthBypass   (bool b) { warmthBypass = b; }
     void setClipBypass     (bool b) { clipBypass = b; }
@@ -101,6 +155,20 @@ public:
     void setTargetIndex    (int   i) { targetIndex = i; }
 
 private:
+    double sampleRate = 44100.0;
+    
+    // LUFS Measurement
+    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> kFilter1;
+    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> kFilter2;
+    
+    float momentaryLUFS = -100.0f;
+    float shortTermLUFS = -100.0f;
+    float integratedLUFS = -100.0f;
+    float integratedSum  = 0.0f;
+    long long integratedCount = 0;
+    float momentaryMax = -100.0f;
+    float shortTermMax = -100.0f;
+
     bool  warmthBypass      = false;
     bool  clipBypass        = false;
     bool  limitBypass       = false;
