@@ -18,15 +18,19 @@ public:
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override {
         juce::ScopedNoDenormals noDenormals;
         
-        // Update engine parameters from APVTS
+        // Sincronizar parámetros con el motor
         engine.setClipGain(apvts.getRawParameterValue("clipGain")->load());
+        engine.setClipKnee(apvts.getRawParameterValue("clipKnee")->load());
         engine.setLimitThreshold(apvts.getRawParameterValue("limitThreshold")->load());
+        engine.setLookAhead(apvts.getRawParameterValue("lookAhead")->load());
+        engine.setRelease(apvts.getRawParameterValue("release")->load());
+        engine.setTargetIndex((int)apvts.getRawParameterValue("targetLufs")->load());
         
         engine.process(buffer);
     }
 
-    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
-    bool hasEditor() const override { return false; }
+    juce::AudioProcessorEditor* createEditor() override;
+    bool hasEditor() const override { return true; }
     const juce::String getName() const override { return "Loudness Catalyst"; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
@@ -49,16 +53,32 @@ public:
             apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
     }
 
-    juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout() {
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout() {
         juce::AudioProcessorValueTreeState::ParameterLayout layout;
+        
+        // Clipper Params
         layout.add(std::make_unique<juce::AudioParameterFloat>("clipGain", "Clipper Gain", 0.0f, 24.0f, 0.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("clipKnee", "Clipper Knee", 0.0f, 1.0f, 0.5f));
+        
+        // Limiter Params
         layout.add(std::make_unique<juce::AudioParameterFloat>("limitThreshold", "Limiter Threshold", -24.0f, 0.0f, 0.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("lookAhead", "Look-ahead", 0.1f, 5.0f, 1.0f));
+        layout.add(std::make_unique<juce::AudioParameterFloat>("release", "Release", 10.0f, 1000.0f, 100.0f));
+        
+        // Smart Target Param
+        layout.add(std::make_unique<juce::AudioParameterChoice>("targetLufs", "Target LUFS", 
+            juce::StringArray {"Off", "-14", "-13", "-12", "-11", "-10", "-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2"}, 0));
+
         return layout;
     }
 
+    float getInLevel() const { return engine.getInLevel(); }
+    float getOutLevel() const { return engine.getOutLevel(); }
+    float getGRLevel() const { return engine.getGRLevel(); }
+
+    juce::AudioProcessorValueTreeState apvts;
 private:
     LoudnessEngine engine;
-    juce::AudioProcessorValueTreeState apvts;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LoudnessCatalystAudioProcessor)
 };
 

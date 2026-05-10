@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// Note: In a production VST, you would implement the React-like UI components using JUCE graphics here.
+// Note: Implementation is currently inline in PluginEditor.h for faster iteration.
+// This file is required by CMake to ensure the target is built correctly.
