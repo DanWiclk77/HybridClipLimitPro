@@ -6,18 +6,36 @@
 class LevelMeter : public juce::Component {
 public:
     void setLevel(float v) { level = v; }
+    void setIsGR(bool is) { isGR = is; }
     void paint(juce::Graphics& g) override {
         auto area = getLocalBounds();
-        g.setColour(juce::Colours::black);
+        g.setColour(juce::Colour(0xFF151518));
         g.fillRect(area);
         
-        float h = area.getHeight() * level;
-        g.setColour(color);
-        g.fillRect(area.withTop(area.getHeight() - (int)h));
+        if (isGR) {
+            // Gain Reduction: 0 dB to -24 dB range for display
+            float db = juce::jlimit(-24.0f, 0.0f, level);
+            float h = area.getHeight() * (db / -24.0f);
+            g.setColour(color);
+            g.fillRect(area.removeFromTop((int)h));
+        } else {
+            // Signal Level: Linear gain (0.0 to 1.5 for headroom)
+            float h = area.getHeight() * juce::jlimit(0.0f, 1.2f, level) / 1.2f;
+            g.setColour(color);
+            g.fillRect(area.withTop(area.getHeight() - (int)h));
+        }
+
+        // Draw scale lines
+        g.setColour(juce::Colours::white.withAlpha(0.1f));
+        for (int i = 1; i < 4; ++i) {
+            float y = area.getHeight() * (i / 4.0f);
+            g.drawHorizontalLine((int)y, 0.0f, (float)area.getWidth());
+        }
     }
     juce::Colour color = juce::Colours::blue;
 private:
     float level = 0.0f;
+    bool isGR = false;
 };
 
 class LoudnessCatalystAudioProcessorEditor : public juce::AudioProcessorEditor, public juce::Timer {
@@ -44,6 +62,7 @@ public:
         inMeter.color = juce::Colours::cyan;
         outMeter.color = juce::Colours::lime;
         grMeter.color = juce::Colours::red;
+        grMeter.setIsGR(true);
 
         addAndMakeVisible(inMeter);
         addAndMakeVisible(outMeter);
@@ -57,12 +76,17 @@ public:
         // Smoothing ballistics for human eyes
         auto updateLevel = [](float current, float next) {
             if (next > current) return next; // Instant rise
-            return current * 0.9f;          // Smooth decay
+            return current * 0.85f;          // Smooth decay
+        };
+
+        auto updateGR = [](float current, float next) {
+            if (next < current) return next; // Instant drop (more reduction)
+            return current * 0.92f;          // Slower return for GR visibility
         };
 
         inLevel = updateLevel(inLevel, processor.getInLevel());
         outLevel = updateLevel(outLevel, processor.getOutLevel());
-        grLevel = updateLevel(grLevel, processor.getGRLevel());
+        grLevel = updateGR(grLevel, processor.getGRLevel());
 
         inMeter.setLevel(inLevel);
         outMeter.setLevel(outLevel);
